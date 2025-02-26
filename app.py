@@ -4,18 +4,22 @@ import pytesseract  # OCR voor gescande PDF's
 import spacy
 import subprocess
 from pdf2image import convert_from_path
-import re
+import os
 
-# ✅ Controleer of het Spacy-model bestaat, zo niet, download het
-try:
-    nlp = spacy.load("nl_core_news_sm")
-except OSError:
-    subprocess.run(["python", "-m", "spacy", "download", "nl_core_news_sm"])
-    nlp = spacy.load("nl_core_news_sm")
+# ✅ Automatisch het Spacy-model downloaden en instellen
+model_name = "nl_core_news_sm"
+spacy_model_path = os.path.expanduser(f"~/.local/share/spacy/{model_name}")
+
+if not os.path.exists(spacy_model_path):
+    st.info("🔄 Downloading Spacy model... (eenmalig)")
+    subprocess.run(["python", "-m", "spacy", "download", model_name], check=True)
+
+nlp = spacy.load(model_name)
 
 # ✅ Webinterface
 st.title("🔒 WOO Anonimiser")
 
+# 📤 PDF Upload
 uploaded_file = st.file_uploader("📄 Upload een PDF", type="pdf")
 
 if uploaded_file:
@@ -40,7 +44,7 @@ if uploaded_file:
                 anonymized_text = anonymized_text.replace(ent.text, "[ANONIEM]")
         return anonymized_text
 
-    # ✅ Verwerk en anonymiseer de PDF
+    # ✅ Verwerk en anonimiseer de PDF
     def anonymize_pdf(input_pdf, output_pdf):
         extracted_text = extract_text_from_pdf(input_pdf)
         anonymized_text = anonymize_text(extracted_text)
@@ -60,3 +64,4 @@ if uploaded_file:
     # ✅ Downloadknop voor de geanonimiseerde PDF
     with open("geanonimiseerd.pdf", "rb") as f:
         st.download_button("📥 Download geanonimiseerde PDF", f, file_name="geanonimiseerd.pdf")
+
