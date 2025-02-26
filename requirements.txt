@@ -3,4 +3,3 @@ pymupdf
 pytesseract
 spacy
 pdf2image
-nl-core-news-sm
