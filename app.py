@@ -1,3 +1,12 @@
+import spacy
+import subprocess
+
+# ✅ Controleer of het Spacy-model bestaat, zo niet, download het
+try:
+    nlp = spacy.load("nl_core_news_lg")
+except OSError:
+    subprocess.run(["python", "-m", "spacy", "download", "nl_core_news_lg"])
+    nlp = spacy.load("nl_core_news_lg")
 import streamlit as st
 import fitz  # PyMuPDF
 import pytesseract
