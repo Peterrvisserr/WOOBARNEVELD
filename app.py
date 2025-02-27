@@ -1,63 +1,53 @@
 import streamlit as st
-import fitz  # PyMuPDF
+import fitz  # PyMuPDF voor PDF-verwerking
+import pytesseract
+from pdf2image import convert_from_path
 import spacy
 import re
 from io import BytesIO
 
-# Laad het NLP-model voor Nederlands
-nlp = spacy.load("nl_core_news_sm")
+# Laad het SpaCy model
+try:
+    nlp = spacy.load("nl_core_news_sm")
+except:
+    import subprocess
+    subprocess.run(["python", "-m", "spacy", "download", "nl_core_news_sm"])
+    nlp = spacy.load("nl_core_news_sm")
 
-# Lijst met woorden en patronen die geanonimiseerd moeten worden
-TE_ANONIMISEREN = [
-    r"\b[A-Z][a-z]+ [A-Z][a-z]+\b",  # Herkent namen (bijv. "Jan Jansen")
-    r"\b\d{2}-\d{2}-\d{4}\b",  # Datums (bijv. 12-04-2025)
-    r"\b\d{10,}\b",  # Lange getallen (zoals telefoonnummers)
-    r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",  # E-mailadressen
-    r"\b\d{9}\b",  # BSN-nummers (9 cijfers)
+# Functie om tekst uit PDF te halen
+def extract_text_from_pdf(pdf_path):
+    text = ""
+    images = convert_from_path(pdf_path)
+
+    for image in images:
+        text += pytesseract.image_to_string(image, lang="nld") + "\n"
+
+    return text
+
+# Functie om gevoelige gegevens te detecteren en lakken
+def anonymize_text(text):
+    doc = nlp(text)
     
-    # **Nieuwe patronen voor adres en aanhef**
-    r"\b(Geachte heer|Geachte mevrouw|Beste|Aan|Dhr\.|Mevr\.)\s+[A-Z][a-z]+\b",  # Aanhef + naam
-    r"\b([A-Z][a-z]+straat|[A-Z][a-z]+laan|[A-Z][a-z]+weg|[A-Z][a-z]+dijk)\s+\d+\b",  # Adres zoals "Dorpstraat 12"
-    r"\b[1-9][0-9]{3}\s?[A-Z]{2}\b",  # Postcodes (bijv. 1234 AB)
-]
+    entities_to_redact = []
+    for ent in doc.ents:
+        if ent.label_ in ["PERSON", "ORG", "GPE", "DATE", "FAC"]:  # Meer categorieën toegevoegd
+            entities_to_redact.append(ent.text)
 
-def anonymize_pdf(pdf_bytes):
-    """Verwerkt een PDF en anonimiseert gevoelige informatie door zwarte balken te plaatsen."""
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    
-    for page in doc:
-        text = page.get_text("text")
+    # Extra patronen voor contactgegevens, adressen en geboortedatum
+    patterns = [
+        r"\b[A-Za-z]+\s[A-Za-z]+\b",  # Namen (Voornaam + Achternaam)
+        r"\b\d{2}-\d{2}-\d{4}\b",  # Geboortedata in DD-MM-YYYY formaat
+        r"\b\d{10}\b",  # Nederlandse telefoonnummers (10 cijfers)
+        r"\b\d{4}\s?[A-Z]{2}\b",  # Nederlandse postcode
+        r"\b[A-Za-z]+straat\b",  # Straatnamen zoals "Hoofdstraat"
+        r"\b[A-Za-z]+weg\b",  # Wegen zoals "Rijksweg"
+        r"\b[A-Za-z]+laan\b",  # Laan zoals "Julianalaan"
+        r"\b[A-Za-z]+plein\b"  # Plein zoals "Raadhuisplein"
+    ]
 
-        # Zoek termen die geanonimiseerd moeten worden
-        for pattern in TE_ANONIMISEREN:
-            matches = re.finditer(pattern, text)
-            for match in matches:
-                found_text = match.group()
-                text_instances = page.search_for(found_text)
-                
-                # Teken zwarte balken over de gevonden tekst
-                for inst in text_instances:
-                    page.draw_rect(inst, color=(0, 0, 0), fill=(0, 0, 0))
+    for pattern in patterns:
+        matches = re.findall(pattern, text)
+        entities_to_redact.extend(matches)
 
-    # Opslaan naar bytes
-    output_pdf = BytesIO()
-    doc.save(output_pdf)
-    output_pdf.seek(0)
-    return output_pdf
-
-# 🌐 **Streamlit UI**
-st.title("📄 PDF Anonimiseerder")
-
-uploaded_file = st.file_uploader("Upload een PDF", type=["pdf"])
-
-if uploaded_file is not None:
-    with st.spinner("PDF wordt verwerkt..."):
-        geanonimiseerd_pdf = anonymize_pdf(uploaded_file.read())
-
-        st.success("✅ PDF is geanonimiseerd!")
-        st.download_button(
-            label="📥 Download geanonimiseerde PDF",
-            data=geanonimiseerd_pdf,
-            file_name="geanonimiseerd.pdf",
-            mime="application/pdf"
-        )
+    # Vervang de gevonden entiteiten door "████████"
+    for entity in set(entities_to
