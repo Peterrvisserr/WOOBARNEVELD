@@ -14,6 +14,11 @@ TE_ANONIMISEREN = [
     r"\b\d{10,}\b",  # Lange getallen (zoals telefoonnummers)
     r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",  # E-mailadressen
     r"\b\d{9}\b",  # BSN-nummers (9 cijfers)
+    
+    # **Nieuwe patronen voor adres en aanhef**
+    r"\b(Geachte heer|Geachte mevrouw|Beste|Aan|Dhr\.|Mevr\.)\s+[A-Z][a-z]+\b",  # Aanhef + naam
+    r"\b([A-Z][a-z]+straat|[A-Z][a-z]+laan|[A-Z][a-z]+weg|[A-Z][a-z]+dijk)\s+\d+\b",  # Adres zoals "Dorpstraat 12"
+    r"\b[1-9][0-9]{3}\s?[A-Z]{2}\b",  # Postcodes (bijv. 1234 AB)
 ]
 
 def anonymize_pdf(pdf_bytes):
