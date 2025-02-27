@@ -1,67 +1,81 @@
 import streamlit as st
 import fitz  # PyMuPDF voor PDF-verwerking
 import pytesseract  # OCR voor gescande PDF's
+from pdf2image import convert_from_path  # Converteert PDF-pagina's naar afbeeldingen voor OCR
 import spacy
-import subprocess
-from pdf2image import convert_from_path
+import io
 import os
 
-# ✅ Automatisch het Spacy-model downloaden en instellen
-model_name = "nl_core_news_sm"
-spacy_model_path = os.path.expanduser(f"~/.local/share/spacy/{model_name}")
+# 🚀 **Laad het NLP-model vooraf**
+try:
+    nlp = spacy.load("nl_core_news_lg")
+except OSError:
+    st.error("Het Nederlandse taalmodel kon niet worden geladen. Controleer of het in requirements.txt staat.")
 
-if not os.path.exists(spacy_model_path):
-    st.info("🔄 Downloading Spacy model... (eenmalig)")
-    subprocess.run(["python", "-m", "spacy", "download", model_name], check=True)
+# 🎨 **Streamlit UI**
+st.title("📄 PDF Anonimiseren")
+st.write("Upload een PDF en download een geanonimiseerde versie.")
 
-nlp = spacy.load(model_name)
+# 📤 **Upload een PDF-bestand**
+uploaded_file = st.file_uploader("Kies een PDF-bestand", type="pdf")
 
-# ✅ Webinterface
-st.title("🔒 WOO Anonimiser")
+# 🎯 **Functie om tekst uit PDF te halen (via OCR als nodig)**
+def extract_text_from_pdf(pdf_path):
+    text = ""
+    pdf_document = fitz.open(pdf_path)
 
-# 📤 PDF Upload
-uploaded_file = st.file_uploader("📄 Upload een PDF", type="pdf")
+    for page_num in range(len(pdf_document)):
+        page = pdf_document[page_num]
+        text += page.get_text("text")
 
+        if not text.strip():  # Gebruik OCR als er geen tekst is
+            images = convert_from_path(pdf_path)
+            for image in images:
+                text += pytesseract.image_to_string(image, lang="nld")
+
+    return text
+
+# 🔒 **Functie om tekst te anonimiseren**
+def anonymize_text(text):
+    doc = nlp(text)
+    anonymized_text = text
+    for ent in doc.ents:
+        anonymized_text = anonymized_text.replace(ent.text, "[REDACTED]")
+    return anonymized_text
+
+# ✍️ **Functie om een nieuwe PDF met geanonimiseerde tekst te maken**
+def create_anonymized_pdf(original_pdf, anonymized_text):
+    pdf_document = fitz.open(original_pdf)
+    output_pdf = fitz.open()
+
+    for page_num in range(len(pdf_document)):
+        page = pdf_document[page_num]
+        new_page = output_pdf.new_page(width=page.rect.width, height=page.rect.height)
+
+        new_page.insert_text((50, 50), anonymized_text, fontsize=10, color=(0, 0, 0))
+
+    return output_pdf
+
+# 🏁 **Verwerk de PDF als er een bestand is geüpload**
 if uploaded_file:
-    with open("input.pdf", "wb") as f:
-        f.write(uploaded_file.read())
+    # 📜 **Bewaar geüploade PDF tijdelijk**
+    temp_pdf_path = "/tmp/input.pdf"
+    with open(temp_pdf_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
 
-    # ✅ Tekstextractie uit PDF (OCR voor gescande bestanden)
-    def extract_text_from_pdf(pdf_path):
-        images = convert_from_path(pdf_path, dpi=300)
-        extracted_text = ""
-        for image in images:
-            page_text = pytesseract.image_to_string(image, lang="nld")
-            extracted_text += page_text + "\n"
-        return extracted_text
+    # 🔍 **Extract en anonimiseer tekst**
+    extracted_text = extract_text_from_pdf(temp_pdf_path)
+    anonymized_text = anonymize_text(extracted_text)
 
-    # ✅ Anonimiseer de herkende tekst
-    def anonymize_text(text):
-        doc = nlp(text)
-        anonymized_text = text
-        for ent in doc.ents:
-            if ent.label_ in ["PERSON", "ORG", "GPE", "MONEY", "EMAIL", "PHONE", "DATE"]:
-                anonymized_text = anonymized_text.replace(ent.text, "[ANONIEM]")
-        return anonymized_text
+    # 📄 **Maak een nieuwe PDF met de geanonimiseerde tekst**
+    anonymized_pdf = create_anonymized_pdf(temp_pdf_path, anonymized_text)
+    
+    # 💾 **Bewaar het als een bestand en geef downloadoptie**
+    output_path = "/tmp/geanonimiseerd.pdf"
+    anonymized_pdf.save(output_path)
 
-    # ✅ Verwerk en anonimiseer de PDF
-    def anonymize_pdf(input_pdf, output_pdf):
-        extracted_text = extract_text_from_pdf(input_pdf)
-        anonymized_text = anonymize_text(extracted_text)
+    with open(output_path, "rb") as file:
+        st.download_button("💾 Download Geanonimiseerde PDF", file, file_name="geanonimiseerd.pdf", mime="application/pdf")
 
-        doc = fitz.open(input_pdf)
-        for page in doc:
-            for word in ["Geachte", "Heer", "Mevrouw", "Beste", "[ANONIEM]"]:
-                text_instances = page.search_for(word)
-                for inst in text_instances:
-                    page.add_redact_annot(inst, fill=(0, 0, 0))
-            page.apply_redactions()
-
-        doc.save(output_pdf)
-
-    anonymize_pdf("input.pdf", "geanonimiseerd.pdf")
-
-    # ✅ Downloadknop voor de geanonimiseerde PDF
-    with open("geanonimiseerd.pdf", "rb") as f:
-        st.download_button("📥 Download geanonimiseerde PDF", f, file_name="geanonimiseerd.pdf")
+    st.success("✅ Geanonimiseerde PDF gegenereerd!")
 
