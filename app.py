@@ -1,87 +1,75 @@
 import streamlit as st
 import fitz  # PyMuPDF
 import pytesseract
+from pdf2image import convert_from_path
 import spacy
 import re
-import os
-import tempfile
-from pdf2image import convert_from_path
-from PIL import Image
 import io
+from PIL import Image, ImageDraw
 
-# Laad Nederlands taalmodel
-model_name = "nl_core_news_lg"
-try:
-    nlp = spacy.load(model_name)
-except OSError:
-    import subprocess
-    subprocess.run(["python3", "-m", "spacy", "download", model_name], check=True)
-    nlp = spacy.load(model_name)
+# Laad het NLP-model
+nlp = spacy.load("nl_core_news_sm")
 
-# Regex-patronen voor extra anonimisatie
-EMAIL_REGEX = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
-PHONE_REGEX = r"\b(?:\+31|0)(6\d{8}|\d{2}-\d{7}|\d{3}-\d{6})\b"
-
-# Functie om tekst te anonimiseren
+# Functie om gevoelige informatie te anonimiseren
 def anonymize_text(text):
     doc = nlp(text)
-    anonymized_text = text
 
-    # Anonimiseer entiteiten (namen, locaties, organisaties)
-    for ent in doc.ents:
-        if ent.label_ in ["PERSON", "GPE", "ORG", "LOC"]:  # Personen, plaatsen, organisaties
-            anonymized_text = anonymized_text.replace(ent.text, "[GEANONIMISEERD]")
+    # Definieer patronen voor e-mail en telefoon
+    email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+    phone_pattern = r'\b\d{2,4}[-.\s]?\d{6,8}\b'
 
-    # Verwijder e-mails en telefoonnummers met regex
-    anonymized_text = re.sub(EMAIL_REGEX, "[EMAIL]", anonymized_text)
-    anonymized_text = re.sub(PHONE_REGEX, "[TELEFOON]", anonymized_text)
+    # Zoek naar namen, locaties en organisaties
+    entities_to_redact = {ent.text for ent in doc.ents if ent.label_ in ["PER", "ORG", "LOC"]}
+    
+    # Zoek naar e-mails en telefoonnummers
+    emails = re.findall(email_pattern, text)
+    phones = re.findall(phone_pattern, text)
 
-    return anonymized_text
+    # Combineer alles wat geanonimiseerd moet worden
+    entities_to_redact.update(emails)
+    entities_to_redact.update(phones)
 
-# Functie om tekst uit een PDF te halen (OCR + standaard tekstherkenning)
-def extract_text_from_pdf(pdf_path):
+    # Vervang de gevonden entiteiten met [GEANONIMISEERD]
+    for entity in entities_to_redact:
+        text = text.replace(entity, "[GEANONIMISEERD]")
+
+    return text
+
+# Functie om tekst te anonimiseren binnen de PDF
+def anonymize_pdf(pdf_path, output_path):
     doc = fitz.open(pdf_path)
-    extracted_text = ""
 
     for page in doc:
         text = page.get_text("text")
-        if not text.strip():  # Als geen tekst gevonden, gebruik OCR
-            image = convert_from_path(pdf_path, first_page=page.number + 1, last_page=page.number + 1)[0]
-            text = pytesseract.image_to_string(image, lang="nld")
-        extracted_text += text + "\n"
+        anonymized_text = anonymize_text(text)
 
-    return extracted_text
+        # Zoek de woorden en vervang ze met zwarte balken
+        for entity in re.findall(r'\[GEANONIMISEERD\]', anonymized_text):
+            for inst in page.search_for(entity):
+                rect = inst
+                page.add_redact_annot(rect, fill=(0, 0, 0))
+        
+        # Voer de redactie uit
+        page.apply_redactions()
 
-# Functie om geanonimiseerde tekst terug in PDF te zetten
-def save_anonymized_pdf(original_pdf, anonymized_text, output_pdf):
-    doc = fitz.open(original_pdf)
-    output_doc = fitz.open()
-
-    for i, page in enumerate(doc):
-        new_page = output_doc.new_page(width=page.rect.width, height=page.rect.height)
-        new_page.insert_text((50, 50), anonymized_text, fontsize=11, color=(0, 0, 0))
-
-    output_doc.save(output_pdf)
-    output_doc.close()
+    doc.save(output_path)
 
 # Streamlit interface
-st.title("📄 PDF Anonimiseerder")
-st.write("Upload een PDF en ontvang een geanonimiseerde versie.")
+st.title("WOO-documenten Anonimiseren")
 
-uploaded_file = st.file_uploader("Upload een PDF-bestand", type=["pdf"])
-if uploaded_file:
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_pdf:
-        temp_pdf.write(uploaded_file.read())
-        temp_pdf_path = temp_pdf.name
+uploaded_file = st.file_uploader("Upload een PDF", type="pdf")
 
-    st.write("**Stap 1: Tekst extractie...**")
-    extracted_text = extract_text_from_pdf(temp_pdf_path)
-    st.write("**Stap 2: Anonimiseren...**")
-    anonymized_text = anonymize_text(extracted_text)
+if uploaded_file is not None:
+    # Sla het geüploade bestand tijdelijk op
+    input_pdf_path = "input.pdf"
+    output_pdf_path = "geanonimiseerd.pdf"
 
-    output_pdf_path = temp_pdf_path.replace(".pdf", "_geanonimiseerd.pdf")
-    save_anonymized_pdf(temp_pdf_path, anonymized_text, output_pdf_path)
+    with open(input_pdf_path, "wb") as f:
+        f.write(uploaded_file.read())
 
-    st.write("**Geanonimiseerde PDF klaar!** ✅")
-    with open(output_pdf_path, "rb") as file:
-        st.download_button("📥 Download geanonimiseerde PDF", file, "geanonimiseerd.pdf", "application/pdf")
+    # Voer de anonimisering uit
+    anonymize_pdf(input_pdf_path, output_pdf_path)
+
+    # Toon downloadknop
+    with open(output_pdf_path, "rb") as f:
+        st.download_button("Download Geanonimiseerde PDF", f, file_name="geanonimiseerd.pdf", mime="application/pdf")
