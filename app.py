@@ -6,6 +6,8 @@ import pytesseract
 from pdf2image import convert_from_path
 from io import BytesIO
 from PIL import Image
+import tempfile
+import os
 
 # Laad het NLP-model voor Nederlands
 nlp = spacy.load("nl_core_news_sm")
@@ -13,7 +15,7 @@ nlp = spacy.load("nl_core_news_sm")
 # Lijst met patronen die geanonimiseerd moeten worden
 TE_ANONIMISEREN = [
     r"\b[A-Z][a-z]+ [A-Z][a-z]+\b",  # Herkent namen (bijv. "Jan Jansen")
-    r"\b\d{2}-\d{2}-\d{4}\b",  # Datums (12-04-2025)
+    r"\b\d{2}-\d{2}-\d{4}\b",  # Geboortedatums (12-04-1985)
     r"\b\d{10,}\b",  # Lange getallen zoals telefoonnummers
     r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",  # E-mailadressen
     r"\b\d{9}\b",  # BSN-nummers (9 cijfers)
@@ -35,7 +37,7 @@ def extract_text_from_pdf(pdf_path):
             extracted_text += text + "\n"
     
     if not extracted_text:
-        # Geen doorzoekbare tekst gevonden, dus OCR toepassen
+        # **Geen doorzoekbare tekst → OCR gebruiken**
         images = convert_from_path(pdf_path, dpi=300)
         extracted_text = ""
         for img in images:
@@ -44,16 +46,16 @@ def extract_text_from_pdf(pdf_path):
     
     return extracted_text
 
-def anonymize_pdf(pdf_bytes):
+def anonymize_pdf(pdf_path):
     """Anonimiseert tekst in de PDF en voegt zwarte balken toe."""
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    doc = fitz.open(pdf_path)
     
     for page in doc:
         text = page.get_text("text")
 
         # **OCR als geen tekst wordt gevonden**
         if not text.strip():
-            images = convert_from_path(pdf_bytes, dpi=300)
+            images = convert_from_path(pdf_path, dpi=300)
             for img in images:
                 text += pytesseract.image_to_string(img, lang="nld")
 
@@ -80,8 +82,12 @@ st.title("📄 PDF Anonimiseerder")
 uploaded_file = st.file_uploader("Upload een PDF", type=["pdf"])
 
 if uploaded_file is not None:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+        tmp_file.write(uploaded_file.read())
+        tmp_file_path = tmp_file.name
+
     with st.spinner("PDF wordt verwerkt..."):
-        geanonimiseerd_pdf = anonymize_pdf(uploaded_file.read())
+        geanonimiseerd_pdf = anonymize_pdf(tmp_file_path)
 
         st.success("✅ PDF is geanonimiseerd!")
         st.download_button(
@@ -90,3 +96,6 @@ if uploaded_file is not None:
             file_name="geanonimiseerd.pdf",
             mime="application/pdf"
         )
+
+    # Opruimen tijdelijk bestand
+    os.remove(tmp_file_path)
