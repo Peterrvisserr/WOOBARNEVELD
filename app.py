@@ -1,3 +1,10 @@
+import os
+
+# Installeer Poppler als het niet aanwezig is
+if not os.path.exists("/usr/bin/pdftoppm"):
+    os.system("apt-get update && apt-get install -y poppler-utils")
+
+
 import streamlit as st
 import fitz  # PyMuPDF
 import spacy
